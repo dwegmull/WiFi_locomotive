@@ -6,7 +6,7 @@
 #include <ESP8266WiFi.h>
 #include <ESPAsyncTCP.h>
 #endif
-#include "ESPAsyncWebServer.h"
+#include "ESPAsyncWebSrv.h"
 
 DNSServer dnsServer;
 AsyncWebServer server(80);

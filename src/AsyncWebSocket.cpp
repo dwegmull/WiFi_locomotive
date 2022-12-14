@@ -460,7 +460,7 @@ AsyncWebSocketMultiMessage::~AsyncWebSocketMultiMessage() {
 /*
  * Async WebSocket Client
  */
- const char * AWSC_PING_PAYLOAD = "ESPAsyncWebServer-PING";
+ const char * AWSC_PING_PAYLOAD = "ESPAsyncWebSrv-PING";
  const size_t AWSC_PING_PAYLOAD_LEN = 22;
 
 AsyncWebSocketClient::AsyncWebSocketClient(AsyncWebServerRequest *request, AsyncWebSocket *server)

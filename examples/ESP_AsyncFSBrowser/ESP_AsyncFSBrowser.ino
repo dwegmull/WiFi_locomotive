@@ -10,7 +10,7 @@
 #include <ESPAsyncTCP.h>
 #include <ESP8266mDNS.h>
 #endif
-#include <ESPAsyncWebServer.h>
+#include <ESPAsyncWebSrv.h>
 #include <SPIFFSEditor.h>
 
 // SKETCH BEGIN
