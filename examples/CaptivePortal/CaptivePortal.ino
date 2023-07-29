@@ -11,12 +11,12 @@
 DNSServer dnsServer;
 AsyncWebServer server(80);
 
-const int output = LED_BUILTIN;
+const int output = D0;
 
 int sliderValue = 0;
 
 // setting PWM properties
-const int freq = 5000;
+const int freq = 30000;
 const int ledChannel = 0;
 const int resolution = 8;
 
@@ -172,7 +172,7 @@ void setupServer()
     if (request->hasParam(PARAM_INPUT))
     {
       inputMessage = request->getParam(PARAM_INPUT)->value();
-      sliderValue = 255 - inputMessage.toInt();
+      sliderValue = inputMessage.toInt();
       ledcWrite(ledChannel, sliderValue);
     }
     else
@@ -193,11 +193,11 @@ void setupServer()
       // Direction pin is PIO0
       if (inputMessage.toInt() == 0)
       {
-        digitalWrite(1, LOW);
+        digitalWrite(D1, LOW);
       }
       else
       {
-        digitalWrite(1, HIGH);
+        digitalWrite(D1, HIGH);
       }
     }
     else
@@ -215,7 +215,8 @@ void setup()
 {
   Serial.begin(9600);
   ledcSetup(ledChannel, freq, resolution);
-  pinMode(1, OUTPUT);
+  pinMode(D0, OUTPUT);
+  pinMode(D1, OUTPUT);
   
   // attach the channel to the GPIO to be controlled
   ledcAttachPin(output, ledChannel);
