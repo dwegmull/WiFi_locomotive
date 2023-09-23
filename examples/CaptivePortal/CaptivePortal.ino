@@ -7,13 +7,24 @@
 #include <ESPAsyncTCP.h>
 #endif
 #include "ESPAsyncWebSrv.h"
+#include "Arduino_JSON.h"
+
+//#define DEBUG_PRINTS
 
 DNSServer dnsServer;
 AsyncWebServer server(80);
 
-const int output = D0;
+// Create an Event Source on /events
+AsyncEventSource events("/events");
 
+// Json Variable to Hold Sensor Readings
+JSONVar readings;
+
+const int output = D9;
+bool travelDirection = 0;
+uint8_t speedValue = 0;
 int sliderValue = 0;
+unsigned long lastConnected = 0;
 
 // setting PWM properties
 const int freq = 30000;
@@ -58,6 +69,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 var JS_speedSlider = document.getElementById("speedSlider");
 var JS_directionSlider = document.getElementById("directionSlider");
 var JS_speedText = document.getElementById("speedText");
+var oldCurrent = 0;
 JS_speedSlider.addEventListener("input", updateSliderPWM);
 JS_directionSlider.addEventListener("input", updateDirection);
 const batteryLevelCv = document.getElementById("batteryLevel");
@@ -66,6 +78,31 @@ const batteryTemperatureCv = document.getElementById("batteryTemperature");
 drawGauge("C", "W", "H", batteryTemperatureCv);
 const motorCurrentCv = document.getElementById("motorCurrent");
 drawGauge("0", "1", "2", motorCurrentCv);
+if (!!window.EventSource)
+{
+ var source = new EventSource('/events');
+ 
+ source.addEventListener('open', function(e)
+ {
+  console.log("Events Connected");
+ }, false);
+ source.addEventListener('error', function(e)
+ {
+  if (e.target.readyState != EventSource.OPEN)
+  {
+    console.log("Events Disconnected");
+  }
+ }, false);
+ source.addEventListener('current', function(e)
+ {
+  console.log("current", e.data);
+  if (e.data != oldCurrent)
+  {
+    setGauge(e.data, oldCurrent, 0, 200, motorCurrentCv);
+    oldCurrent = e.data;
+  }
+ }, false);
+}
 
 function updateSliderPWM()
 {
@@ -126,6 +163,26 @@ function drawGauge(leftText, midText, rightText, canvas)
   ctx.fillText(rightText, 50 - (w / 2), 25);
   ctx.restore();
 }
+
+function setGauge(value, oldValue, min, max, canvas)
+{
+  const ctx = canvas.getContext("2d");
+  const r = 40;
+  const angle = Math.PI + (Math.PI/4) + ((Math.PI/2) / (max - min)) / (value - min)
+  const oldAngle = Math.PI + (Math.PI/4) + ((Math.PI/2) / (max - min)) / (oldValue - min)
+  ctx.strokeStyle = "#000000";
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(50, 50);
+  ctx.lineTo(r * Math.cos(oldAngle), r * Math.sin(oldAngle));
+  ctx.stroke();
+  ctx.strokeStyle = "#FFDE00";
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(50, 50);
+  ctx.lineTo(r * Math.cos(angle), r * Math.sin(angle));
+  ctx.stroke();
+}
 </script>
 </body>
 </html>)rawliteral";
@@ -157,6 +214,19 @@ public:
   }
 };
 
+static void setSpeed(void)
+{
+  lastConnected = millis();
+  if (travelDirection == 0)
+  {
+    ledcWrite(ledChannel, speedValue);
+  }
+  else
+  {
+    ledcWrite(ledChannel, 255 - speedValue);
+  }
+}
+
 void setupServer()
 {
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
@@ -172,14 +242,16 @@ void setupServer()
     if (request->hasParam(PARAM_INPUT))
     {
       inputMessage = request->getParam(PARAM_INPUT)->value();
-      sliderValue = inputMessage.toInt();
-      ledcWrite(ledChannel, sliderValue);
+      speedValue = inputMessage.toInt();
+      setSpeed();
     }
     else
     {
       inputMessage = "No message sent";
     }
+#ifdef DEBUG_PRINTS
     Serial.println(inputMessage);
+#endif
     request->send(200, "text/plain", "OK");
   });
   
@@ -190,22 +262,27 @@ void setupServer()
     if (request->hasParam(PARAM_INPUT))
     {
       inputMessage = request->getParam(PARAM_INPUT)->value();
-      // Direction pin is PIO0
+      speedValue = 0; // Always stop when reversing.
       if (inputMessage.toInt() == 0)
       {
-        digitalWrite(D1, LOW);
+        travelDirection = 0;
+        digitalWrite(D8, LOW);
       }
       else
       {
-        digitalWrite(D1, HIGH);
+        travelDirection = 1;
+        digitalWrite(D8, HIGH);
       }
+      setSpeed();
     }
     else
     {
       inputMessage = "No message sent";
     }
+#ifdef DEBUG_PRINTS
     Serial.print("Direction: ");
     Serial.println(inputMessage);
+#endif
     request->send(200, "text/plain", "OK");
   });
 }
@@ -213,27 +290,73 @@ void setupServer()
 
 void setup()
 {
+#ifdef DEBUG_PRINTS
   Serial.begin(9600);
+#endif
   ledcSetup(ledChannel, freq, resolution);
-  pinMode(D0, OUTPUT);
-  pinMode(D1, OUTPUT);
+  pinMode(D8, OUTPUT);
+  pinMode(D9, OUTPUT);
   
   // attach the channel to the GPIO to be controlled
   ledcAttachPin(output, ledChannel);
   
   ledcWrite(ledChannel, sliderValue);
 
-  //your other setup stuff...
   WiFi.softAP("Plymouth Locomotive Works", NULL, 1, 0, 1);
   setupServer();
   dnsServer.start(53, "*", WiFi.softAPIP());
   server.addHandler(new CaptiveRequestHandler()).setFilter(ON_AP_FILTER);//only when requested from AP
-  //more handlers...
+
+ events.onConnect([](AsyncEventSourceClient *client){
+    if(client->lastId()){
+      Serial.printf("Client reconnected! Last message ID that it got is: %u\n", client->lastId());
+    }
+    // send event with message "hello!", id current millis
+    // and set reconnect delay to 1 second
+    client->send("hello!", NULL, millis(), 10000);
+  });
+  server.addHandler(&events);
+
+#ifdef DEBUG_PRINTS
   Serial.println("Starting the server");
+#endif
   server.begin();
+  WiFi.setSleep(true);
+  setCpuFrequencyMhz(80);
+}
+
+// Get Sensor Readings and return JSON object
+String getSensorReadings()
+{
+  uint adcVal = analogRead(A3);
+  readings["current"] = String(adcVal);
+#ifdef DEBUG_PRINTS
+  Serial.printf("ADC = %d\n", adcVal);
+#endif
+  //readings["humidity"] =  String(bme.readHumidity());
+  String jsonString = JSON.stringify(readings);
+  return jsonString;
 }
 
 void loop()
 {
+  int val;
   dnsServer.processNextRequest();
+  if ((millis() - lastConnected) > 30000)
+  {
+    speedValue = 0;
+#ifdef DEBUG_PRINTS
+    if ((millis() & 0x7FF) == 0x400)
+    {
+      Serial.println("not connected");
+    }
+#endif
+    setSpeed();
+  }
+  if ((millis() & 0x7FF) == 0x400)
+  {
+    //events.send("ping",NULL,millis());
+    events.send(getSensorReadings().c_str(),"current" ,millis());
+
+  }
 }
