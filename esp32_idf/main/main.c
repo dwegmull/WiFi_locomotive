@@ -20,6 +20,7 @@
 
 #include "esp_http_server.h"
 #include "dns_server.h"
+#include "freertos/task.h"
 
 #define EXAMPLE_ESP_WIFI_SSID CONFIG_ESP_WIFI_SSID
 #define EXAMPLE_ESP_WIFI_PASS CONFIG_ESP_WIFI_PASSWORD
@@ -39,6 +40,7 @@ struct async_resp_arg {
     httpd_handle_t hd;
     int fd;
 };
+
 
 /*
  * async send function, which we put into the httpd work queue
@@ -168,17 +170,18 @@ static esp_err_t ws_handler(httpd_req_t *req)
             return ret;
         }
         ESP_LOGI(TAG, "Got packet with message: %s", ws_pkt.payload);
-    }
-    ESP_LOGI(TAG, "Packet type: %d", ws_pkt.type);
-    if (ws_pkt.type == HTTPD_WS_TYPE_TEXT &&
-        strcmp((char*)ws_pkt.payload,"Trigger async") == 0) {
-        free(buf);
-        return trigger_async_send(req->handle, req);
-    }
-    ESP_LOGI(TAG, "echo %s", ws_pkt.payload);
-    ret = httpd_ws_send_frame(req, &ws_pkt);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "httpd_ws_send_frame failed with %d", ret);
+        switch (ws_pkt.payload[0])
+        {
+            default:
+                ESP_LOGI(TAG, "unkown tag: %x", ws_pkt.payload[0]);
+            break;
+            case 's':
+                ESP_LOGI(TAG, "speed set to: %d", atoi((char*)&ws_pkt.payload[2]));
+            break;
+            case 'd':
+                ESP_LOGI(TAG, "direction set to: %d", atoi((char*)&ws_pkt.payload[2]));
+            break;
+        }
     }
     free(buf);
     return ret;
@@ -233,6 +236,7 @@ static httpd_handle_t start_webserver(void)
 
 void app_main(void)
 {
+    httpd_handle_t serverHandle = NULL;
     /*
         Turn of warnings from HTTP server as redirecting traffic will yield
         lots of invalid requests
@@ -263,4 +267,26 @@ void app_main(void)
     // Start the DNS server that will redirect all queries to the softAP IP
     dns_server_config_t config = DNS_SERVER_CONFIG_SINGLE("*" /* all A queries */, "WIFI_AP_DEF" /* softAP netif ID */);
     start_dns_server(&config);
+    if (serverHandle != NULL)
+    {
+        uint8_t cnt = 0;
+        uint8_t tempTemp = 0;
+        httpd_req_t req;
+        for (;;)
+        {
+           vTaskDelay(10 / portTICK_PERIOD_MS);
+           cnt++;
+           if (cnt > 100)
+           {
+               cnt = 0;
+               tempTemp++;
+               if (tempTemp > 60)
+               {
+                   tempTemp = 0;
+               }
+               
+               trigger_async_send(serverHandle, &req);
+           }
+        }
+    }
 }
