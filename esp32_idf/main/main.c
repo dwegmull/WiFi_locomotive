@@ -48,7 +48,7 @@ struct async_resp_arg {
 static void ws_async_send(void *arg)
 {
     ESP_LOGI(TAG, "ws async send");
-    static const char * data = "Async data";
+    static const char * data = "{\"temperature\": 25}";
     struct async_resp_arg *resp_arg = arg;
     httpd_handle_t hd = resp_arg->hd;
     int fd = resp_arg->fd;
@@ -62,17 +62,35 @@ static void ws_async_send(void *arg)
     free(resp_arg);
 }
 
-static esp_err_t trigger_async_send(httpd_handle_t handle, httpd_req_t *req)
+static esp_err_t trigger_async_send(httpd_req_t *req)
 {
-    struct async_resp_arg *resp_arg = malloc(sizeof(struct async_resp_arg));
-    if (resp_arg == NULL) {
-        return ESP_ERR_NO_MEM;
+    if (!req->handle)
+    {
+        ESP_LOGI(TAG, "No handle\n");
+        return ESP_ERR_NOT_ALLOWED;
     }
-    resp_arg->hd = req->handle;
-    resp_arg->fd = httpd_req_to_sockfd(req);
-    esp_err_t ret = httpd_queue_work(handle, ws_async_send, resp_arg);
-    if (ret != ESP_OK) {
-        free(resp_arg);
+    esp_err_t ret = ESP_OK;
+    size_t clients = 1;
+    int    client_fd;
+    if (httpd_get_client_list(req->handle, &clients, &client_fd) == ESP_OK)
+    {
+        ESP_LOGI(TAG, "Got the client list\n");
+        if (httpd_ws_get_fd_info(req->handle, client_fd) == HTTPD_WS_CLIENT_WEBSOCKET)
+        {
+            ESP_LOGI(TAG, "Active client (fd=%d) -> sending async message", client_fd);
+            struct async_resp_arg *resp_arg = malloc(sizeof(struct async_resp_arg));
+            if (resp_arg == NULL)
+            {
+                return ESP_ERR_NO_MEM;
+            }
+            resp_arg->hd = req->handle;
+            resp_arg->fd = client_fd;
+            ret = httpd_queue_work(req->handle, ws_async_send, resp_arg);
+            if (ret != ESP_OK)
+            {
+                free(resp_arg);
+            }
+        }
     }
     return ret;
 }
@@ -219,7 +237,7 @@ static httpd_handle_t start_webserver(void)
 {
     httpd_handle_t server = NULL;
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.max_open_sockets = 13;
+    config.max_open_sockets = 1;
     config.lru_purge_enable = true;
 
     // Start the httpd server
@@ -262,31 +280,30 @@ void app_main(void)
     wifi_init_softap();
 
     // Start the server for the first time
-    start_webserver();
+    serverHandle = start_webserver();
 
     // Start the DNS server that will redirect all queries to the softAP IP
     dns_server_config_t config = DNS_SERVER_CONFIG_SINGLE("*" /* all A queries */, "WIFI_AP_DEF" /* softAP netif ID */);
     start_dns_server(&config);
-    if (serverHandle != NULL)
+    ESP_LOGI(TAG, "Server handle: %lx\n", (uint32_t)serverHandle);
+    uint8_t cnt = 0;
+    uint8_t tempTemp = 0;
+    httpd_req_t req;
+    for (;;)
     {
-        uint8_t cnt = 0;
-        uint8_t tempTemp = 0;
-        httpd_req_t req;
-        for (;;)
-        {
-           vTaskDelay(10 / portTICK_PERIOD_MS);
-           cnt++;
-           if (cnt > 100)
+       vTaskDelay(10 / portTICK_PERIOD_MS);
+       cnt++;
+       if (cnt > 100)
+       {
+           cnt = 0;
+           tempTemp++;
+           if (tempTemp > 60)
            {
-               cnt = 0;
-               tempTemp++;
-               if (tempTemp > 60)
-               {
-                   tempTemp = 0;
-               }
-               
-               trigger_async_send(serverHandle, &req);
+               tempTemp = 0;
            }
-        }
+           ESP_LOGI(TAG, "tempTemp = %d\n", tempTemp);
+           req.handle = serverHandle;
+           trigger_async_send(&req);
+       }
     }
 }
