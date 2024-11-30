@@ -42,7 +42,7 @@ function onload(event)
 
 function initWebSocket()
 {
-    console.log('Trying to open a WebSocket connection…');
+    console.log('Trying to open a websocket connection…');
     websocket = new WebSocket(gateway);
     websocket.onopen = onOpen;
     websocket.onclose = onClose;
@@ -55,6 +55,7 @@ function onOpen(event)
   console.log('Connection opened');
   updateSliderPWM()
   updateDirection()
+  setInterval(updateSliderPWM(), 10000)
 }
 
 function onClose(event)
@@ -79,9 +80,9 @@ function onMessage(event)
           break;
           case "b":
             newBattery = myObj[key];
-            if (newBattery < 0)
+            if (newBattery < 1)
             {
-              newBattery = 0;
+              newBattery = 1;
             }
             if (newBattery > 100)
             {
@@ -93,9 +94,9 @@ function onMessage(event)
           break;
           case "c":
             newCurrent = myObj[key];
-            if (newCurrent < 0)
+            if (newCurrent < 1)
             {
-              newCurrent = 0;
+              newCurrent = 1;
             }
             if (newCurrent > 10)
             {
@@ -107,9 +108,9 @@ function onMessage(event)
           break;
           case "t":
             newTemperature = myObj[key];
-            if (newTemperature < -10)
+            if (newTemperature < -9)
             {
-              newTemperature = -10;
+              newTemperature = -9;
             }
             if (newTemperature > 60)
             {
@@ -198,20 +199,21 @@ function drawGauge(leftText, midText, rightText, canvas)
 function setGauge(value, oldValue, min, max, canvas)
 {
   const ctx = canvas.getContext("2d");
-  const r = 40;
-  const angle = Math.PI + (Math.PI/4) + ((Math.PI/2) / (max - min)) / (value - min)
-  const oldAngle = Math.PI + (Math.PI/4) + ((Math.PI/2) / (max - min)) / (oldValue - min)
+  var r = 20;
+  var angle = Math.PI - ((-1.6 * Math.PI/4) + (1.6 * Math.PI/2) * ((value - min) / (max - min)))
+  var oldAngle = Math.PI - ((-1.6 * Math.PI/4) + (1.6 * Math.PI/2) * ((oldValue - min) / (max - min)))
   ctx.strokeStyle = "#000000";
-  ctx.lineWidth = 4;
+  ctx.lineWidth = 3;
   ctx.beginPath();
   ctx.moveTo(50, 50);
-  ctx.lineTo(r * Math.cos(oldAngle), r * Math.sin(oldAngle));
+  console.log("x = " + (50 + r * Math.cos(oldAngle)) + "y =" + (50 + r * Math.sin(oldAngle)));
+  ctx.lineTo(50 + r * Math.sin(oldAngle), 50 + r * Math.cos(oldAngle));
   ctx.stroke();
   ctx.strokeStyle = "#FFDE00";
-  ctx.lineWidth = 4;
+  ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(50, 50);
-  ctx.lineTo(r * Math.cos(angle), r * Math.sin(angle));
+  ctx.lineTo(50 + r * Math.sin(angle), 50 + r * Math.cos(angle));
   ctx.stroke();
 }
 

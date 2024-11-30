@@ -31,12 +31,17 @@ extern const char root_end[] asm("_binary_root_html_end");
 
 static const char *TAG = "wifiLoco";
 
+uint8_t temperature = 25;
+uint8_t current = 0;
+uint8_t batteryLevel = 100;
+
 /*
  * Structure holding server handle
  * and internal socket fd in order
  * to use out of request send
  */
-struct async_resp_arg {
+struct async_resp_arg
+{
     httpd_handle_t hd;
     int fd;
 };
@@ -48,7 +53,8 @@ struct async_resp_arg {
 static void ws_async_send(void *arg)
 {
     ESP_LOGI(TAG, "ws async send");
-    static const char * data = "{\"temperature\": 25}";
+    char data[100];
+    sprintf(data, "{\"t\": %d, \"c\": %d, \"b\": %d}", temperature, current, batteryLevel);
     struct async_resp_arg *resp_arg = arg;
     httpd_handle_t hd = resp_arg->hd;
     int fd = resp_arg->fd;
@@ -95,17 +101,22 @@ static esp_err_t trigger_async_send(httpd_req_t *req)
     return ret;
 }
 
-static void wifi_event_handler(void *arg, esp_event_base_t event_base,
-                               int32_t event_id, void *event_data)
+static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
-    if (event_id == WIFI_EVENT_AP_STACONNECTED) {
+    if (event_id == WIFI_EVENT_AP_STACONNECTED)
+    {
         wifi_event_ap_staconnected_t *event = (wifi_event_ap_staconnected_t *)event_data;
         ESP_LOGI(TAG, "station " MACSTR " join, AID=%d",
                  MAC2STR(event->mac), event->aid);
-    } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
-        wifi_event_ap_stadisconnected_t *event = (wifi_event_ap_stadisconnected_t *)event_data;
-        ESP_LOGI(TAG, "station " MACSTR " leave, AID=%d",
-                 MAC2STR(event->mac), event->aid);
+    }
+    else
+    {
+        if (event_id == WIFI_EVENT_AP_STADISCONNECTED)
+        {
+            wifi_event_ap_stadisconnected_t *event = (wifi_event_ap_stadisconnected_t *)event_data;
+            ESP_LOGI(TAG, "station " MACSTR " leave, AID=%d",
+                     MAC2STR(event->mac), event->aid);
+        }
     }
 }
 
@@ -116,7 +127,8 @@ static void wifi_init_softap(void)
 
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL));
 
-    wifi_config_t wifi_config = {
+    wifi_config_t wifi_config = 
+    {
         .ap = {
             .ssid = EXAMPLE_ESP_WIFI_SSID,
             .ssid_len = strlen(EXAMPLE_ESP_WIFI_SSID),
@@ -125,7 +137,8 @@ static void wifi_init_softap(void)
             .authmode = WIFI_AUTH_WPA_WPA2_PSK
         },
     };
-    if (strlen(EXAMPLE_ESP_WIFI_PASS) == 0) {
+    if (strlen(EXAMPLE_ESP_WIFI_PASS) == 0)
+    {
         wifi_config.ap.authmode = WIFI_AUTH_OPEN;
     }
 
@@ -157,7 +170,8 @@ static esp_err_t root_get_handler(httpd_req_t *req)
 static esp_err_t ws_handler(httpd_req_t *req)
 {
     ESP_LOGI(TAG, "ws handler");
-    if (req->method == HTTP_GET) {
+    if (req->method == HTTP_GET)
+    {
         ESP_LOGI(TAG, "Handshake done, the new connection was opened");
         return ESP_OK;
     }
@@ -167,22 +181,26 @@ static esp_err_t ws_handler(httpd_req_t *req)
     ws_pkt.type = HTTPD_WS_TYPE_TEXT;
     /* Set max_len = 0 to get the frame len */
     esp_err_t ret = httpd_ws_recv_frame(req, &ws_pkt, 0);
-    if (ret != ESP_OK) {
+    if (ret != ESP_OK)
+    {
         ESP_LOGE(TAG, "httpd_ws_recv_frame failed to get frame len with %d", ret);
         return ret;
     }
     ESP_LOGI(TAG, "frame len is %d", ws_pkt.len);
-    if (ws_pkt.len) {
+    if (ws_pkt.len)
+    {
         /* ws_pkt.len + 1 is for NULL termination as we are expecting a string */
         buf = calloc(1, ws_pkt.len + 1);
-        if (buf == NULL) {
+        if (buf == NULL)
+        {
             ESP_LOGE(TAG, "Failed to calloc memory for buf");
             return ESP_ERR_NO_MEM;
         }
         ws_pkt.payload = buf;
         /* Set max_len = ws_pkt.len to get the frame payload */
         ret = httpd_ws_recv_frame(req, &ws_pkt, ws_pkt.len);
-        if (ret != ESP_OK) {
+        if (ret != ESP_OK)
+        {
             ESP_LOGE(TAG, "httpd_ws_recv_frame failed with %d", ret);
             free(buf);
             return ret;
@@ -206,13 +224,15 @@ static esp_err_t ws_handler(httpd_req_t *req)
 
 }
 
-static const httpd_uri_t root = {
+static const httpd_uri_t root =
+{
     .uri = "/",
     .method = HTTP_GET,
     .handler = root_get_handler
 };
 
-static const httpd_uri_t ws = {
+static const httpd_uri_t ws =
+{
         .uri        = "/ws",
         .method     = HTTP_GET,
         .handler    = ws_handler,
@@ -242,7 +262,8 @@ static httpd_handle_t start_webserver(void)
 
     // Start the httpd server
     ESP_LOGI(TAG, "Starting server on port: '%d'", config.server_port);
-    if (httpd_start(&server, &config) == ESP_OK) {
+    if (httpd_start(&server, &config) == ESP_OK)
+    {
         // Set URI handlers
         ESP_LOGI(TAG, "Registering URI handlers");
         httpd_register_uri_handler(server, &root);
@@ -287,23 +308,22 @@ void app_main(void)
     start_dns_server(&config);
     ESP_LOGI(TAG, "Server handle: %lx\n", (uint32_t)serverHandle);
     uint8_t cnt = 0;
-    uint8_t tempTemp = 0;
     httpd_req_t req;
     for (;;)
     {
-       vTaskDelay(10 / portTICK_PERIOD_MS);
-       cnt++;
-       if (cnt > 100)
-       {
-           cnt = 0;
-           tempTemp++;
-           if (tempTemp > 60)
-           {
-               tempTemp = 0;
-           }
-           ESP_LOGI(TAG, "tempTemp = %d\n", tempTemp);
-           req.handle = serverHandle;
-           trigger_async_send(&req);
-       }
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+        cnt++;
+        if (cnt > 100)
+        {
+            cnt = 0;
+            temperature++;
+            if (temperature > 60)
+            {
+                temperature = 0;
+            }
+            ESP_LOGI(TAG, "tempTemp = %d\n", temperature);
+            req.handle = serverHandle;
+            trigger_async_send(&req);
+        }
     }
 }
